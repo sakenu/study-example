@@ -1,0 +1,207 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper
+  PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+  "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+
+  
+<mapper namespace = "mapper">
+	
+	<resultMap type="map" id="loginRs">
+		<result property="memId" column="MEM_ID"/>
+		<result property="memPass" column="MEM_PASS"/>
+		<result property="memName" column="MEM_NAME"/>
+		<result property="memRank" column="MEM_RANK"/>
+		<result property="memRankKor" column="MEM_RANK_KOR"/>
+	</resultMap>
+	
+	<resultMap type="map" id="apprListRs">
+		<result property="seq" column="SEQ"/>
+		<result property="writeId" column="WRITE_ID"/>
+		<result property="writeName" column="WRITE_NAME"/>
+		<result property="apprSubject" column="APPR_SUBJECT"/>
+		<result property="apprContent" column="APPR_CONTENT"/>
+		<result property="apprStatus" column="APPR_STATUS"/>
+		<result property="apprRegDate" column="APPR_REG_DATE"/>
+		<result property="apprDate" column="APPR_DATE"/>
+		<result property="apprApper" column="APPR_APPER"/>
+		<result property="apprStatusKor" column="APPR_STATUS_KOR"/>	
+		<result property="apperName" column="APPER_NAME"/>
+	</resultMap>
+	
+	<resultMap type="map" id="historyRs">
+		<result property="hisSeq" column="HIS_SEQ"/>
+		<result property="apprSeq" column="APPR_SEQ"/>
+		<result property="hisAppDate" column="HIS_APP_DATE"/>
+		<result property="hisApper" column="HIST_APPER"/>
+		<result property="hisApperName" column="HIST_APPER_NAME"/>
+		<result property="hisStatus" column="HIST_STATUS"/>
+		<result property="hisStatusKor" column="HIST_STATUS_KOR"/>
+		 
+	</resultMap>
+	
+	<select id="loginChk" resultMap="loginRs" parameterType="String">
+		SELECT
+			MEM_ID
+			,MEM_PASS
+			,MEM_NAME
+			,MEM_RANK
+			,decode(MEM_RANK, 'sa','사원','da','대리','ga','과장','ba','부장') MEM_RANK_KOR
+		FROM STUDY_APPROVAL_MEMBER
+		WHERE MEM_ID = #{logId}
+	</select>
+	
+	<select id="apprList" resultMap="apprListRs" parameterType="map">
+		SELECT
+			SEQ
+			,WRITE_ID
+			,(select MEM_NAME from STUDY_APPROVAL_MEMBER sam where sam.mem_id = sal.write_id) WRITE_NAME
+			,APPR_SUBJECT
+			,APPR_STATUS
+			,decode(APPR_STATUS, 'tmp','임시저장','wat','결재대기','ing','결재중','end','결재완료','ret','반려') APPR_STATUS_KOR 
+			,APPR_REG_DATE
+			,APPR_DATE
+			,APPR_APPER
+			,(select MEM_NAME from STUDY_APPROVAL_MEMBER sam where sam.mem_id = sal.APPR_APPER) APPER_NAME
+		FROM STUDY_APPROVAL_LIST sal
+		WHERE 1=1
+		<choose>
+			<when test="memInfo.memRank == 'sa'">
+			and WRITE_ID = #{memInfo.memId}
+			</when>
+			<when test="memInfo.memRank == 'da'">
+			and WRITE_ID = #{memInfo.memId}
+			</when>
+			<when test="memInfo.memRank == 'ga'">
+			and (
+              WRITE_ID = #{memInfo.memId}
+              or APPR_STATUS = 'wat'
+              or seq in (
+		                  select 
+		                    appr_seq 
+		                  from ( 
+		                      select 
+		                          appr_seq
+		                          ,rank() over(PARTITION BY appr_Seq order by his_seq desc) rk 
+		                      from study_approval_history 
+		                       
+		                      ) 
+		                   where  rk in (1,2)
+		                   and hist_apper = #{memInfo.memId}
+             		 )
+			)
+			</when>
+			<when test="memInfo.memRank == 'ba'">
+			and (WRITE_ID = #{memInfo.memId} or (APPR_APPER = #{memInfo.memId} or APPR_STATUS = 'ing'))
+			</when>
+		</choose>
+		<choose>
+			<when test="searchType == 'writeName'">
+				and write_id in (select mem_id from STUDY_APPROVAL_MEMBER where mem_name like '%${searchTxt}%')
+			</when>
+			<when test="searchType == 'appSubject'">
+				and APPR_SUBJECT like '%${searchTxt}%'
+			</when>
+			<when test="searchType == 'apperName'">
+				and APPR_APPER like '%${searchTxt}%'
+			</when>
+		</choose>
+		<if test="searchStatus != 'stEmp' and searchStatus != null and searchStatus != ''">
+			and APPR_STATUS = #{searchStatus}
+		</if>
+		<if test="stDate != null and stDate != ''">
+			and APPR_REG_DATE between #{stDate} and #{enDate}
+		</if>
+		order by seq desc
+	</select>
+	
+	<select id="writeSeq" resultType="integer">
+		select nvl(max(SEQ), 0) +1 from STUDY_APPROVAL_LIST
+	</select>
+	
+	<select id="detail" resultMap="apprListRs" parameterType="integer">
+		SELECT
+			SEQ
+			,WRITE_ID
+			,(select MEM_NAME from STUDY_APPROVAL_MEMBER sam where sam.mem_id = sal.write_id) WRITE_NAME
+			,APPR_SUBJECT
+			,APPR_CONTENT
+			,APPR_STATUS
+		FROM STUDY_APPROVAL_LIST sal
+		where seq = #{seq}
+	</select>
+	
+	<select id="dataChk" resultType="integer" parameterType="String">
+		select nvl(max(seq), 0) from  STUDY_APPROVAL_LIST where seq = #{seq}
+	</select>
+	
+	<insert id="insert" parameterType="map">
+		insert into STUDY_APPROVAL_LIST
+		(
+			SEQ
+			,WRITE_ID
+			,APPR_SUBJECT
+			,APPR_CONTENT
+			,APPR_STATUS
+			,APPR_REG_DATE
+			<if test = "appChk == 'Y'.toString()">
+				,APPR_DATE
+				,APPR_APPER
+			</if>
+		)values(
+			#{seq}
+			,#{writerId}
+			,#{subj}
+			,#{content}
+			,#{status}
+			,sysdate
+			<if test = "appChk == 'Y'.toString()">
+				,sysdate
+				,#{memInfo.memId}
+			</if>
+		)
+	</insert>
+	
+	<update id="update" parameterType="map">
+		update STUDY_APPROVAL_LIST
+		set	
+			APPR_SUBJECT = #{subj}
+			,APPR_CONTENT = #{content}
+			,APPR_STATUS = #{status}
+			<if test = "appChk == 'Y'.toString()">
+				,APPR_DATE = sysdate
+				,APPR_APPER = #{memInfo.memId}
+			</if>
+			<if test = "status == 'tmp'">
+				,APPR_DATE = null
+				,APPR_APPER = null
+			</if>
+		where seq = #{seq}
+		
+	</update>
+	
+	<insert id="history" parameterType="map">
+		insert into study_approval_history 
+		values 
+		(
+		  (select nvl(max(his_seq), 0)+1 from study_approval_history where appr_seq = #{seq})
+		  ,#{seq}
+		  ,sysdate
+		  ,#{logId}
+		  ,#{status}
+		)
+	</insert>
+	
+	<select id="histList" resultMap="historyRs" parameterType="integer">
+		select
+			HIS_SEQ
+			,APPR_SEQ
+			,HIS_APP_DATE
+			,HIST_APPER
+			,(select MEM_NAME from STUDY_APPROVAL_MEMBER sam where sam.mem_id = sah.HIST_APPER) HIST_APPER_NAME
+			,HIST_STATUS
+			,decode(HIST_STATUS, 'tmp','임시저장','wat','결재대기','ing','결재중','end','결재완료','ret','반려') HIST_STATUS_KOR
+		from STUDY_APPROVAL_HISTORY sah
+		where appr_seq = #{seq}
+		order by his_seq desc
+	</select>
+</mapper>
